@@ -33,6 +33,7 @@ namespace ClipHistory
         private int _cycleIndex = 0;
         private bool _suppressNextMonitor;
         private bool _cycleInProgress;
+        private bool _suppressComboEvent;
 
         private Point _dragStart;
         private DisplayItem _dragItem;
@@ -80,13 +81,14 @@ namespace ClipHistory
         {
             if (!IsVisible)
             {
+                // 次回起動時は必ず通常履歴表示状態で起動
+                TabHistory.IsChecked = true; 
                 ReloadList();
                 SetPositionToMouse();
                 Show();
             }
             else
             {
-                // 既に表示されている場合もマウス位置へ移動させる
                 SetPositionToMouse();
             }
             WindowState = WindowState.Normal;
@@ -118,11 +120,7 @@ namespace ClipHistory
 
         private void Window_Deactivated(object sender, EventArgs e)
         {
-            // ダイアログを開いていないのにフォーカスが外れた場合は非表示にする
-            if (!_isDialogOpen && IsVisible)
-            {
-                HideAndRelease();
-            }
+            if (!_isDialogOpen && IsVisible) HideAndRelease();
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -146,8 +144,78 @@ namespace ClipHistory
         {
             if (!IsLoaded) return;
             _currentMode = TabTemplate.IsChecked == true ? ViewMode.Template : ViewMode.History;
-            SearchBox.Text = "";
+
+            if (_currentMode == ViewMode.History)
+            {
+                SearchBox.Visibility = Visibility.Visible;
+                BtnClearSearch.Visibility = Visibility.Visible;
+                ComboTemplateSet.Visibility = Visibility.Collapsed;
+                BtnDeleteSet.Visibility = Visibility.Collapsed;
+                SearchBox.Text = "";
+                ReloadList();
+            }
+            else
+            {
+                SearchBox.Visibility = Visibility.Collapsed;
+                BtnClearSearch.Visibility = Visibility.Collapsed;
+                ComboTemplateSet.Visibility = Visibility.Visible;
+                BtnDeleteSet.Visibility = Visibility.Visible;
+                LoadTemplateSets();
+            }
+        }
+
+        private void LoadTemplateSets()
+        {
+            var sets = _repo.LoadTemplateSets();
+            sets.Add(new TemplateSet { Id = -1, Name = "＋ 新規セット作成" });
+
+            _suppressComboEvent = true;
+            ComboTemplateSet.ItemsSource = sets;
+            if (sets.Count > 1) ComboTemplateSet.SelectedIndex = 0;
+            else ComboTemplateSet.SelectedIndex = -1;
+            _suppressComboEvent = false;
+
             ReloadList();
+        }
+
+        private void ComboTemplateSet_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressComboEvent) return;
+
+            if (ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id == -1)
+            {
+                OpenDialog(() =>
+                {
+                    var dlg = new InputBoxDialog("新規セット作成", "セット名を入力してください:") { Owner = this };
+                    if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(dlg.InputText))
+                    {
+                        var newSet = _repo.AddTemplateSet(dlg.InputText);
+                        LoadTemplateSets();
+                        _suppressComboEvent = true;
+                        foreach (TemplateSet s in ComboTemplateSet.Items)
+                            if (s.Id == newSet.Id) { ComboTemplateSet.SelectedItem = s; break; }
+                        _suppressComboEvent = false;
+                        ReloadList();
+                    }
+                    else
+                    {
+                        LoadTemplateSets();
+                    }
+                });
+            }
+            else
+            {
+                ReloadList();
+            }
+        }
+
+        private void DeleteSet_Click(object sender, RoutedEventArgs e)
+        {
+            if (ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id != -1)
+            {
+                _repo.DeleteTemplateSet(selected.Id);
+                LoadTemplateSets();
+            }
         }
 
         private void ReloadList()
@@ -161,11 +229,10 @@ namespace ClipHistory
             }
             else
             {
-                data = _repo.LoadTemplates();
-                if (!string.IsNullOrEmpty(SearchBox.Text))
+                data = new List<DisplayItem>();
+                if (ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id != -1)
                 {
-                    var kw = SearchBox.Text.ToLower();
-                    data = data.Where(t => t.DisplayText.ToLower().Contains(kw) || t.FullText.ToLower().Contains(kw)).ToList();
+                    data = _repo.LoadTemplatesBySet(selected.Id);
                 }
             }
             _items = new ObservableCollection<DisplayItem>(data);
@@ -195,19 +262,13 @@ namespace ClipHistory
 
         private void OnTextCopied(string text)
         {
-            if (_suppressNextMonitor)
-            {
-                _suppressNextMonitor = false;
-                return;
-            }
-            _cycleInProgress = false;
-            _cycleIndex = 0;
+            if (_suppressNextMonitor) { _suppressNextMonitor = false; return; }
+            _cycleInProgress = false; _cycleIndex = 0;
 
             var added = _repo.AddHistory(text);
 
             if (IsVisible && _currentMode == ViewMode.History && _items != null && string.IsNullOrEmpty(SearchBox.Text))
             {
-                // UI上の重複を削除してから先頭に追加
                 var existing = _items.FirstOrDefault(i => i.FullText == text);
                 if (existing != null) _items.Remove(existing);
 
@@ -232,7 +293,6 @@ namespace ClipHistory
             }
 
             SetClipboardText(item.FullText);
-
             _cycleIndex++;
             if (_cycleIndex >= total) _cycleIndex = 0;
         }
@@ -254,8 +314,6 @@ namespace ClipHistory
         private void HistoryList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (_dragItem == null) return;
-            
-            // マウスがあまり移動していなければシングルクリック（再コピー）と判定
             Point pos = e.GetPosition(null);
             if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
                 Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
@@ -267,7 +325,7 @@ namespace ClipHistory
 
         private void CopyItemAndHide(DisplayItem item)
         {
-            _suppressNextMonitor = false; // 次回の監視を有効にしてトップへ移動させる
+            _suppressNextMonitor = false; 
             _cycleInProgress = false;
             _cycleIndex = 0;
             try { Clipboard.SetText(item.FullText); } catch { }
@@ -279,12 +337,11 @@ namespace ClipHistory
         private void HistoryList_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton != MouseButtonState.Pressed || _dragItem == null) return;
-            if (!string.IsNullOrEmpty(SearchBox.Text)) return; // 検索中は並べ替え不可
+            if (!string.IsNullOrEmpty(SearchBox.Text)) return;
 
             Point pos = e.GetPosition(null);
             if (Math.Abs(pos.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
-                return;
+                Math.Abs(pos.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
 
             DragDrop.DoDragDrop(HistoryList, _dragItem, DragDropEffects.Move);
         }
@@ -339,6 +396,21 @@ namespace ClipHistory
 
                 if (selectedItem != null)
                 {
+                    // 定型文に登録メニューの構築
+                    var sets = _repo.LoadTemplateSets();
+                    if (sets.Count > 0)
+                    {
+                        var addToTplMenu = new MenuItem { Header = "定型文に登録" };
+                        foreach (var set in sets)
+                        {
+                            var setItem = new MenuItem { Header = set.Name };
+                            setItem.Click += (s, args) => _repo.AddTemplateItem(set.Id, selectedItem.FullText);
+                            addToTplMenu.Items.Add(setItem);
+                        }
+                        menu.Items.Add(addToTplMenu);
+                        menu.Items.Add(new Separator());
+                    }
+
                     menu.Items.Add(CreateMenu("編集", MenuEdit_Click));
                     menu.Items.Add(CreateMenu("お気に入り登録/解除", MenuFavorite_Click));
                     menu.Items.Add(CreateMenu("削除", MenuDelete_Click));
@@ -346,12 +418,15 @@ namespace ClipHistory
             }
             else
             {
-                menu.Items.Add(CreateMenu("定型文を新規追加", MenuAddTemplate_Click));
-                if (selectedItem != null)
+                if (ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id != -1)
                 {
-                    menu.Items.Add(new Separator());
-                    menu.Items.Add(CreateMenu("編集", MenuEditTemplate_Click));
-                    menu.Items.Add(CreateMenu("削除", MenuDeleteTemplate_Click));
+                    menu.Items.Add(CreateMenu("定型文を新規追加", MenuAddTemplate_Click));
+                    if (selectedItem != null)
+                    {
+                        menu.Items.Add(new Separator());
+                        menu.Items.Add(CreateMenu("編集", MenuEditTemplate_Click));
+                        menu.Items.Add(CreateMenu("削除", MenuDeleteTemplate_Click));
+                    }
                 }
             }
         }
@@ -372,7 +447,6 @@ namespace ClipHistory
                 if (dlg.ShowDialog() == true)
                 {
                     item.FullText = dlg.EditedText;
-                    item.DisplayText = dlg.EditedText;
                     _repo.UpdateHistoryText(item.Id, dlg.EditedText);
                     if (dlg.CopyRequested) CopyItemAndHide(item);
                 }
@@ -396,13 +470,14 @@ namespace ClipHistory
 
         private void MenuAddTemplate_Click(object sender, RoutedEventArgs e)
         {
+            if (!(ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id != -1)) return;
             OpenDialog(() =>
             {
-                var dlg = new TemplateEditDialog("", "") { Owner = this };
-                if (dlg.ShowDialog() == true)
+                var dlg = new EditDialog("") { Owner = this };
+                if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(dlg.EditedText))
                 {
-                    var added = _repo.AddTemplate(dlg.TemplateTitle, dlg.TemplateText);
-                    if (string.IsNullOrEmpty(SearchBox.Text)) _items.Add(added);
+                    var added = _repo.AddTemplateItem(selected.Id, dlg.EditedText);
+                    _items.Add(added);
                 }
             });
         }
@@ -412,12 +487,11 @@ namespace ClipHistory
             if (!(HistoryList.SelectedItem is DisplayItem item)) return;
             OpenDialog(() =>
             {
-                var dlg = new TemplateEditDialog(item.DisplayText, item.FullText) { Owner = this };
+                var dlg = new EditDialog(item.FullText) { Owner = this };
                 if (dlg.ShowDialog() == true)
                 {
-                    item.DisplayText = dlg.TemplateTitle;
-                    item.FullText = dlg.TemplateText;
-                    _repo.UpdateTemplate(item.Id, item.DisplayText, item.FullText);
+                    item.FullText = dlg.EditedText;
+                    _repo.UpdateTemplateItem(item.Id, item.FullText);
                     if (dlg.CopyRequested) CopyItemAndHide(item);
                 }
             });
@@ -426,7 +500,7 @@ namespace ClipHistory
         private void MenuDeleteTemplate_Click(object sender, RoutedEventArgs e)
         {
             if (!(HistoryList.SelectedItem is DisplayItem item)) return;
-            _repo.DeleteTemplate(item.Id);
+            _repo.DeleteTemplateItem(item.Id);
             _items.Remove(item);
         }
 
