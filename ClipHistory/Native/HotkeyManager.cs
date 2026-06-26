@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Windows;
 using System.Windows.Interop;
 
 namespace ClipHistory.Native
@@ -17,10 +16,6 @@ namespace ClipHistory.Native
         Win = 0x0008
     }
 
-    /// <summary>
-    /// RegisterHotKey によるグローバルホットキー。
-    /// メッセージ駆動でCPUを消費しない。
-    /// </summary>
     public sealed class HotkeyManager : IDisposable
     {
         private const int WM_HOTKEY = 0x0312;
@@ -36,14 +31,19 @@ namespace ClipHistory.Native
         private readonly Dictionary<int, Action> _handlers = new Dictionary<int, Action>();
         private int _nextId = 1;
 
-        public void Attach(Window window)
+        public void Attach()
         {
-            _hwnd = new WindowInteropHelper(window).EnsureHandle();
-            _source = HwndSource.FromHwnd(_hwnd);
+            // メッセージ受信用に独立したダミーウィンドウ（HWND_MESSAGE）を生成
+            var parameters = new HwndSourceParameters("HotkeyManagerWindow")
+            {
+                Width = 0, Height = 0, WindowStyle = 0,
+                ParentWindow = new IntPtr(-3)
+            };
+            _source = new HwndSource(parameters);
             _source.AddHook(WndProc);
+            _hwnd = _source.Handle;
         }
 
-        /// <returns>登録ID（変更時の再登録に使用）。失敗時は -1</returns>
         public int Register(HotkeyModifiers mods, uint virtualKey, Action handler)
         {
             int id = _nextId++;
@@ -85,6 +85,7 @@ namespace ClipHistory.Native
             }
             _handlers.Clear();
             _source?.RemoveHook(WndProc);
+            _source?.Dispose();
         }
     }
 }
