@@ -23,19 +23,14 @@ namespace ClipHistory
         private readonly ClipboardMonitor _clipboard = new ClipboardMonitor();
         private readonly HotkeyManager _hotkeys = new HotkeyManager();
 
-        // 表示用コレクション（必要分のみ保持。UI非表示時はクリアする）
         private ObservableCollection<ClipItem> _items;
-
-        // インクリメンタル検索のデバウンス用
         private DispatcherTimer _searchDebounce;
         private string _pendingSearch;
 
-        // 順送り状態
         private int _cycleIndex = 0;
-        private bool _suppressNextMonitor; // 自分でSetTextした際の自己反映抑制
+        private bool _suppressNextMonitor;
         private bool _cycleInProgress;
 
-        // D&D
         private Point _dragStart;
         private ClipItem _dragItem;
 
@@ -52,20 +47,13 @@ namespace ClipHistory
             InitializeComponent();
         }
 
-        /// <summary>
-        /// 表示せずにハンドルだけ確保し、クリップボード監視・ホットキーを開始。
-        /// 起動時は履歴を一切ロードしない。
-        /// </summary>
         public void InitializeHidden()
         {
-            // ハンドル生成（非表示）
-            var helper = new System.Windows.Interop.WindowInteropHelper(this);
-            helper.EnsureHandle();
-
-            _clipboard.Attach(this);
+            // MainWindowのハンドルに依存せず、専用のダミーウィンドウを生成してフックする
+            _clipboard.Attach();
             _clipboard.TextCopied += OnTextCopied;
 
-            _hotkeys.Attach(this);
+            _hotkeys.Attach();
             RegisterHotkeys();
 
             _searchDebounce = new DispatcherTimer
@@ -87,24 +75,19 @@ namespace ClipHistory
                 (HotkeyModifiers)_settings.CycleModifiers, _settings.CycleKey, OnCycleHotkey);
         }
 
-        // ---------------- クリップボード監視 ----------------
-
         private void OnTextCopied(string text)
         {
-            // 自分でSetTextした場合は履歴追加せず、順送り状態も維持
             if (_suppressNextMonitor)
             {
                 _suppressNextMonitor = false;
                 return;
             }
 
-            // ユーザーが通常コピーした → 順送り状態を破棄
             _cycleInProgress = false;
             _cycleIndex = 0;
 
             var added = _repo.Add(text);
 
-            // UI表示中なら先頭へ反映
             if (IsVisible && _items != null && string.IsNullOrEmpty(SearchBox.Text))
             {
                 _items.Insert(0, added);
@@ -112,8 +95,6 @@ namespace ClipHistory
                     _items.RemoveAt(_items.Count - 1);
             }
         }
-
-        // ---------------- 順送りホットキー ----------------
 
         private void OnCycleHotkey()
         {
@@ -129,7 +110,6 @@ namespace ClipHistory
             var item = _repo.GetNextForCycle(_cycleIndex);
             if (item == null)
             {
-                // 循環: 先頭へ
                 _cycleIndex = 0;
                 item = _repo.GetNextForCycle(_cycleIndex);
                 if (item == null) return;
@@ -138,10 +118,9 @@ namespace ClipHistory
             SetClipboardText(item.Text);
 
             _cycleIndex++;
-            if (_cycleIndex >= total) _cycleIndex = 0; // 末尾→先頭循環
+            if (_cycleIndex >= total) _cycleIndex = 0;
         }
 
-        /// <summary>自分でクリップボードへ書き込む（監視の自己反映を抑制）</summary>
         private void SetClipboardText(string text)
         {
             _suppressNextMonitor = true;
@@ -154,8 +133,6 @@ namespace ClipHistory
                 _suppressNextMonitor = false;
             }
         }
-
-        // ---------------- 表示制御 ----------------
 
         public void ShowAndActivate()
         {
@@ -173,7 +150,6 @@ namespace ClipHistory
 
         private void LoadInitialPage()
         {
-            // 必要最小限（先頭ページ）のみ遅延ロード
             var page = _repo.LoadPage(0, PageSize);
             _items = new ObservableCollection<ClipItem>(page);
             HistoryList.ItemsSource = _items;
@@ -181,7 +157,6 @@ namespace ClipHistory
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
-            // ×ボタンでは終了せず非表示にしてメモリを解放
             e.Cancel = true;
             HideAndRelease();
         }
@@ -189,14 +164,11 @@ namespace ClipHistory
         private void HideAndRelease()
         {
             Hide();
-            // UI非表示時に保持オブジェクトを解放
             HistoryList.ItemsSource = null;
             _items = null;
             SearchBox.Text = string.Empty;
             GC.Collect(0, GCCollectionMode.Optimized);
         }
-
-        // ---------------- 検索（インクリメンタル） ----------------
 
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
@@ -218,8 +190,6 @@ namespace ClipHistory
             foreach (var it in result) _items.Add(it);
         }
 
-        // ---------------- 再コピー ----------------
-
         private void HistoryList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             CopySelected();
@@ -231,15 +201,12 @@ namespace ClipHistory
         {
             if (HistoryList.SelectedItem is ClipItem item)
             {
-                // 通常コピー扱い: 順送りリセット + 最新履歴化したいので監視に任せる
                 _suppressNextMonitor = false;
                 _cycleInProgress = false;
                 _cycleIndex = 0;
                 try { Clipboard.SetText(item.Text); } catch { }
             }
         }
-
-        // ---------------- 編集 ----------------
 
         private void MenuEdit_Click(object sender, RoutedEventArgs e)
         {
@@ -253,8 +220,6 @@ namespace ClipHistory
             }
         }
 
-        // ---------------- お気に入り ----------------
-
         private void MenuFavorite_Click(object sender, RoutedEventArgs e)
         {
             if (!(HistoryList.SelectedItem is ClipItem item)) return;
@@ -262,16 +227,12 @@ namespace ClipHistory
             _repo.SetFavorite(item.Id, item.IsFavorite);
         }
 
-        // ---------------- 削除 ----------------
-
         private void MenuDelete_Click(object sender, RoutedEventArgs e)
         {
             if (!(HistoryList.SelectedItem is ClipItem item)) return;
             _repo.Delete(item.Id);
             _items.Remove(item);
         }
-
-        // ---------------- ドラッグ＆ドロップ並べ替え ----------------
 
         private void HistoryList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -282,7 +243,6 @@ namespace ClipHistory
         private void HistoryList_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton != MouseButtonState.Pressed || _dragItem == null) return;
-            // 検索中は並べ替え不可（順序が不定になるため）
             if (!string.IsNullOrEmpty(SearchBox.Text)) return;
 
             Point pos = e.GetPosition(null);
@@ -312,17 +272,14 @@ namespace ClipHistory
 
             _items.Move(oldIndex, newIndex);
 
-            // 並べ替え結果を永続化（現在ページ範囲の sort_order を再採番）
             PersistReorder();
             _dragItem = null;
         }
 
         private void PersistReorder()
         {
-            // 先頭ページ全体を対象に再採番。検索無効時のみ実行。
             var ids = _items.Select(i => i.Id).ToList();
             _repo.Reorder(ids);
-            // sort_order をUI側にも反映
             for (int i = 0; i < _items.Count; i++) _items[i].SortOrder = i;
         }
 
@@ -332,8 +289,6 @@ namespace ClipHistory
                 src = System.Windows.Media.VisualTreeHelper.GetParent(src);
             return (src as ListBoxItem)?.DataContext as ClipItem;
         }
-
-        // ---------------- 設定 ----------------
 
         public void OpenSettings()
         {
