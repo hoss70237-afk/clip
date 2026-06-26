@@ -16,14 +16,16 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x' # 生成AIが作った.NETのバージョンに合わせて変更してください（6.0, 7.0, 8.0など）
+        dotnet-version: '8.0.x' 
 
-    # 依存関係の復元とビルド（1つのEXEにまとめる設定）
-    - name: Publish Single File EXE
+    # .NET Framework (net48) プロジェクトのため、単一ファイル発行(PublishSingleFile)等の
+    # .NET Core 以降専用のオプションは使用できません。
+    # ソリューション単位での出力エラーを防ぐため、プロジェクトファイルを明示的に指定してパブリッシュします。
+    - name: Publish Executable
       run: |
-        dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:PublishReadyToRun=true -o ./publish_output
+        dotnet publish ClipHistory/ClipHistory.csproj -c Release -o ./publish_output
 
-    # 出来上がったEXEファイルをGitHub上に保存
+    # 出来上がったEXEファイルと依存DLL群をGitHub上に保存
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
