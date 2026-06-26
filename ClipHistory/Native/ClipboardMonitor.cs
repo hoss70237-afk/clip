@@ -20,15 +20,17 @@ namespace ClipHistory.Native
         private IntPtr _hwnd;
         private bool _attached;
 
+        // 連続発火防止用のキャッシュ
+        private string _lastText;
+        private DateTime _lastCopiedTime;
+
         public event Action<string> TextCopied;
 
         public void Attach()
         {
-            // メッセージ受信用に独立したダミーウィンドウ（HWND_MESSAGE）を生成
             var parameters = new HwndSourceParameters("ClipboardMonitorWindow")
             {
-                Width = 0, Height = 0, WindowStyle = 0,
-                ParentWindow = new IntPtr(-3)
+                Width = 0, Height = 0, WindowStyle = 0, ParentWindow = new IntPtr(-3)
             };
             _source = new HwndSource(parameters);
             _source.AddHook(WndProc);
@@ -56,13 +58,19 @@ namespace ClipHistory.Native
                     string text = Clipboard.GetText();
                     if (!string.IsNullOrEmpty(text))
                     {
+                        // 同じテキストが500ms以内に連続で来た場合は弾く（コピー時2重発火の抑制）
+                        if (text == _lastText && (DateTime.Now - _lastCopiedTime).TotalMilliseconds < 500)
+                            return;
+
+                        _lastText = text;
+                        _lastCopiedTime = DateTime.Now;
                         TextCopied?.Invoke(text);
                     }
                 }
             }
             catch (Exception)
             {
-                // クリップボードが他プロセスにロックされている場合は無視
+                // ロック時無視
             }
         }
 
