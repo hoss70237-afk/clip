@@ -5,10 +5,6 @@ using System.Text;
 
 namespace ClipHistory.Services
 {
-    /// <summary>
-    /// 設定の読み書き。外部JSONライブラリに依存せず、
-    /// 単純な key=value テキストで軽量に永続化する。
-    /// </summary>
     public static class SettingsManager
     {
         public static Settings Load(string path)
@@ -22,14 +18,18 @@ namespace ClipHistory.Services
                 if (eq <= 0) continue;
                 string key = line.Substring(0, eq).Trim();
                 string val = line.Substring(eq + 1).Trim();
-                if (!uint.TryParse(val, out uint v)) continue;
-
-                switch (key)
+                
+                if (key == "WindowWidth" && double.TryParse(val, out double w)) s.WindowWidth = w;
+                else if (key == "WindowHeight" && double.TryParse(val, out double h)) s.WindowHeight = h;
+                else if (uint.TryParse(val, out uint v))
                 {
-                    case "ShowModifiers": s.ShowModifiers = v; break;
-                    case "ShowKey": s.ShowKey = v; break;
-                    case "CycleModifiers": s.CycleModifiers = v; break;
-                    case "CycleKey": s.CycleKey = v; break;
+                    switch (key)
+                    {
+                        case "ShowModifiers": s.ShowModifiers = v; break;
+                        case "ShowKey": s.ShowKey = v; break;
+                        case "CycleModifiers": s.CycleModifiers = v; break;
+                        case "CycleKey": s.CycleKey = v; break;
+                    }
                 }
             }
             return s;
@@ -42,6 +42,8 @@ namespace ClipHistory.Services
             sb.AppendLine("ShowKey=" + s.ShowKey);
             sb.AppendLine("CycleModifiers=" + s.CycleModifiers);
             sb.AppendLine("CycleKey=" + s.CycleKey);
+            sb.AppendLine("WindowWidth=" + s.WindowWidth);
+            sb.AppendLine("WindowHeight=" + s.WindowHeight);
             File.WriteAllText(path, sb.ToString());
         }
     }
