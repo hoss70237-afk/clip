@@ -6,10 +6,6 @@ using System.Windows.Interop;
 
 namespace ClipHistory.Native
 {
-    /// <summary>
-    /// AddClipboardFormatListener による完全イベント駆動監視。
-    /// ポーリング・タイマー・常駐スレッドを一切使用しない。
-    /// </summary>
     public sealed class ClipboardMonitor : IDisposable
     {
         private const int WM_CLIPBOARDUPDATE = 0x031D;
@@ -24,14 +20,20 @@ namespace ClipHistory.Native
         private IntPtr _hwnd;
         private bool _attached;
 
-        /// <summary>テキストがコピーされた時に発火（テキスト内容を渡す）</summary>
         public event Action<string> TextCopied;
 
-        public void Attach(Window window)
+        public void Attach()
         {
-            _hwnd = new WindowInteropHelper(window).EnsureHandle();
-            _source = HwndSource.FromHwnd(_hwnd);
+            // メッセージ受信用に独立したダミーウィンドウ（HWND_MESSAGE）を生成
+            var parameters = new HwndSourceParameters("ClipboardMonitorWindow")
+            {
+                Width = 0, Height = 0, WindowStyle = 0,
+                ParentWindow = new IntPtr(-3)
+            };
+            _source = new HwndSource(parameters);
             _source.AddHook(WndProc);
+            _hwnd = _source.Handle;
+            
             _attached = AddClipboardFormatListener(_hwnd);
         }
 
@@ -49,7 +51,6 @@ namespace ClipHistory.Native
         {
             try
             {
-                // テキスト形式のみを対象とする。画像/HTML/ファイルは無視。
                 if (Clipboard.ContainsText())
                 {
                     string text = Clipboard.GetText();
@@ -73,6 +74,7 @@ namespace ClipHistory.Native
                 _attached = false;
             }
             _source?.RemoveHook(WndProc);
+            _source?.Dispose();
         }
     }
 }
