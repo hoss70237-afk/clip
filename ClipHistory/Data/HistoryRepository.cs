@@ -20,8 +20,7 @@ namespace ClipHistory.Data
 
             var csb = new SqliteConnectionStringBuilder
             {
-                DataSource = dbPath,
-                CacheSize = 2000
+                DataSource = dbPath
             };
 
             _conn = new SqliteConnection(csb.ToString());
@@ -36,9 +35,10 @@ namespace ClipHistory.Data
 
         private void Initialize()
         {
-            // 接続文字列ではなくPRAGMAでWALモードと同期設定を行う
+            // 接続文字列ではなくPRAGMAでWALモード・キャッシュ・同期設定を行う
             ExecuteNonQuery(@"
 PRAGMA page_size = 4096;
+PRAGMA cache_size = 2000;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 ");
