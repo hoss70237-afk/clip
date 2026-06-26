@@ -4,8 +4,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Height="500" Width="400"
         WindowStyle="None"
-        ResizeMode="NoResize"
-        AllowsTransparency="True"
+        AllowsTransparency="False"
+        ResizeMode="CanResize"
         Background="White"
         BorderBrush="#999"
         BorderThickness="1"
@@ -13,6 +13,11 @@
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
         Deactivated="Window_Deactivated">
+    <WindowChrome.WindowChrome>
+        <!-- タイトルバーなしでリサイズ枠のみ確保 -->
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"/>
+    </WindowChrome.WindowChrome>
+    
     <Grid Margin="6">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -20,24 +25,29 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- タブ切り替え部 -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
             <RadioButton x:Name="TabHistory" Content="履歴" GroupName="ModeTabs" IsChecked="True" Checked="Tab_Checked" Margin="0,0,10,0"/>
             <RadioButton x:Name="TabTemplate" Content="定型文" GroupName="ModeTabs" Checked="Tab_Checked"/>
         </StackPanel>
 
-        <!-- 検索ボックス部 -->
         <Grid Grid.Row="1" Margin="0,0,0,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
+            
+            <!-- 履歴用検索ボックス -->
             <TextBox x:Name="SearchBox" Grid.Column="0" Padding="4" FontSize="13" TextChanged="SearchBox_TextChanged"/>
-            <Button Grid.Column="1" Content="✕" Width="26" Margin="4,0,0,0" ToolTip="クリア" Click="ClearSearch_Click"/>
+            <Button x:Name="BtnClearSearch" Grid.Column="1" Content="✕" Width="26" Margin="4,0,0,0" ToolTip="クリア" Click="ClearSearch_Click"/>
+
+            <!-- 定型文用セット選択ボックス（初期非表示） -->
+            <ComboBox x:Name="ComboTemplateSet" Grid.Column="0" Padding="4" FontSize="13" Visibility="Collapsed" SelectionChanged="ComboTemplateSet_SelectionChanged" DisplayMemberPath="Name"/>
+            <Button x:Name="BtnDeleteSet" Grid.Column="1" Content="✕" Width="26" Margin="4,0,0,0" ToolTip="このセットを削除" Click="DeleteSet_Click" Visibility="Collapsed"/>
         </Grid>
 
-        <!-- 仮想化リスト -->
+        <!-- 横スクロール無効化 -->
         <ListBox x:Name="HistoryList" Grid.Row="2"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="True"
                  VirtualizingPanel.VirtualizationMode="Recycling"
                  VirtualizingPanel.ScrollUnit="Item"
