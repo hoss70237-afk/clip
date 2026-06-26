@@ -3,19 +3,15 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <!-- net48 は Windows 7 SP1 以降で動作可能 -->
     <TargetFramework>net48</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <LangVersion>latest</LangVersion>
     <AssemblyName>ClipHistory</AssemblyName>
     <RootNamespace>ClipHistory</RootNamespace>
-    <!-- 高速起動・省メモリ最適化 -->
     <Optimize>true</Optimize>
     <TieredCompilation>true</TieredCompilation>
 
-    <!-- 手書き Properties/AssemblyInfo.cs との重複(CS0579)を防ぐため、
-         SDKによる AssemblyInfo の自動生成を無効化する -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
     <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
@@ -25,8 +21,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 唯一の外部依存。軽量なネイティブSQLiteラッパ -->
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.118" />
+    <!-- 依存関係トラブルが起きにくい Microsoft.Data.Sqlite に変更 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
