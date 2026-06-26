@@ -1,12 +1,10 @@
 // File: ClipHistory/Models/DisplayItem.cs
 using System;
 using System.ComponentModel;
+using System.Linq;
 
 namespace ClipHistory.Models
 {
-    /// <summary>
-    /// 履歴・定型文を統合して扱うモデル。
-    /// </summary>
     public sealed class DisplayItem : INotifyPropertyChanged
     {
         private string _displayText;
@@ -20,13 +18,29 @@ namespace ClipHistory.Models
         public string DisplayText
         {
             get => _displayText;
-            set { if (_displayText != value) { _displayText = value; OnPropertyChanged(nameof(DisplayText)); } }
+            private set { if (_displayText != value) { _displayText = value; OnPropertyChanged(nameof(DisplayText)); } }
         }
 
         public string FullText
         {
             get => _fullText;
-            set { if (_fullText != value) { _fullText = value; OnPropertyChanged(nameof(FullText)); } }
+            set
+            {
+                if (_fullText != value)
+                {
+                    _fullText = value;
+                    OnPropertyChanged(nameof(FullText));
+
+                    // リスト表示用に最初の1行目だけを抽出
+                    if (string.IsNullOrEmpty(value))
+                        DisplayText = "";
+                    else
+                    {
+                        var line = value.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                        DisplayText = line ?? "";
+                    }
+                }
+            }
         }
 
         public int SortOrder
