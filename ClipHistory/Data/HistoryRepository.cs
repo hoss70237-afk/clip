@@ -48,15 +48,21 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE INDEX IF NOT EXISTS idx_sort  ON history(sort_order);
 CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
 
-CREATE TABLE IF NOT EXISTS templates (
+CREATE TABLE IF NOT EXISTS template_sets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT    NOT NULL,
+    name        TEXT    NOT NULL,
+    sort_order  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS template_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_id      INTEGER NOT NULL,
     text        TEXT    NOT NULL,
     sort_order  INTEGER NOT NULL,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
+CREATE INDEX IF NOT EXISTS idx_tpl_set ON template_items(set_id);
 ");
         }
 
@@ -66,7 +72,6 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
         }
 
         // ========================== 履歴機能 ==========================
-
         public int CountHistory()
         {
             lock (_lock)
@@ -120,14 +125,10 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             {
                 while (r.Read())
                 {
-                    string text = r.GetString(1);
                     list.Add(new DisplayItem
                     {
-                        Id = r.GetInt64(0),
-                        IsTemplate = false,
-                        DisplayText = text,
-                        FullText = text,
-                        SortOrder = r.GetInt32(2),
+                        Id = r.GetInt64(0), IsTemplate = false,
+                        FullText = r.GetString(1), SortOrder = r.GetInt32(2),
                         IsFavorite = r.GetInt32(3) != 0
                     });
                 }
@@ -140,9 +141,6 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             {
                 using (var tx = _conn.BeginTransaction())
                 {
-                    long now = ToUnix(DateTime.UtcNow);
-
-                    // 既に同じテキストが存在する場合は削除して重複を防ぐ
                     long existingId = 0;
                     using (var cmd = new SqliteCommand("SELECT id FROM history WHERE text=@t LIMIT 1;", _conn, tx))
                     {
@@ -165,7 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
                         minOrder = Convert.ToInt32(cmd.ExecuteScalar());
                     
                     int newOrder = minOrder - 1;
-
+                    long now = ToUnix(DateTime.UtcNow);
                     long newId;
                     using (var cmd = new SqliteCommand(
                         @"INSERT INTO history(text, sort_order, is_favorite, created_at, updated_at)
@@ -180,31 +178,24 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
 
                     TrimHistoryExcess(tx);
                     tx.Commit();
-
-                    return new DisplayItem
-                    {
-                        Id = newId, IsTemplate = false, DisplayText = text, FullText = text,
-                        SortOrder = newOrder, IsFavorite = false
-                    };
+                    return new DisplayItem { Id = newId, IsTemplate = false, FullText = text, SortOrder = newOrder, IsFavorite = false };
                 }
             }
         }
 
         private void TrimHistoryExcess(SqliteTransaction tx)
         {
-            int count;
             using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM history;", _conn, tx))
-                count = Convert.ToInt32(cmd.ExecuteScalar());
-            
-            if (count <= MaxItems) return;
+            {
+                if (Convert.ToInt32(cmd.ExecuteScalar()) <= MaxItems) return;
+            }
 
-            int over = count - MaxItems;
             using (var cmd = new SqliteCommand(
                 @"DELETE FROM history WHERE id IN (
                       SELECT id FROM history WHERE is_favorite = 0
-                      ORDER BY sort_order DESC LIMIT @n );", _conn, tx))
+                      ORDER BY sort_order DESC LIMIT (SELECT COUNT(*)-@m FROM history) );", _conn, tx))
             {
-                cmd.Parameters.AddWithValue("@n", over);
+                cmd.Parameters.AddWithValue("@m", MaxItems);
                 cmd.ExecuteNonQuery();
             }
         }
@@ -237,10 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             }
         }
 
-        public void ReorderHistory(IReadOnlyList<long> orderedIds)
-        {
-            ReorderTable("history", orderedIds);
-        }
+        public void ReorderHistory(IReadOnlyList<long> orderedIds) => ReorderTable("history", orderedIds);
 
         public void DeleteHistory(long id)
         {
@@ -268,73 +256,128 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             }
         }
 
-        // ========================== 定型文機能 ==========================
+        // ========================== 定型文（セット）機能 ==========================
+        public List<TemplateSet> LoadTemplateSets()
+        {
+            var list = new List<TemplateSet>();
+            lock (_lock)
+            {
+                using (var cmd = new SqliteCommand("SELECT id, name FROM template_sets ORDER BY sort_order ASC;", _conn))
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read()) list.Add(new TemplateSet { Id = r.GetInt64(0), Name = r.GetString(1) });
+                }
+            }
+            return list;
+        }
 
-        public List<DisplayItem> LoadTemplates()
+        public TemplateSet AddTemplateSet(string name)
+        {
+            lock (_lock)
+            {
+                using (var tx = _conn.BeginTransaction())
+                {
+                    int order = 0;
+                    using (var cmd = new SqliteCommand("SELECT IFNULL(MAX(sort_order), -1) FROM template_sets;", _conn, tx))
+                        order = Convert.ToInt32(cmd.ExecuteScalar()) + 1;
+
+                    long newId;
+                    using (var cmd = new SqliteCommand("INSERT INTO template_sets(name, sort_order) VALUES(@n, @o); SELECT last_insert_rowid();", _conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@n", name);
+                        cmd.Parameters.AddWithValue("@o", order);
+                        newId = Convert.ToInt64(cmd.ExecuteScalar());
+                    }
+                    tx.Commit();
+                    return new TemplateSet { Id = newId, Name = name };
+                }
+            }
+        }
+
+        public void DeleteTemplateSet(long setId)
+        {
+            lock (_lock)
+            {
+                using (var tx = _conn.BeginTransaction())
+                {
+                    using (var cmd = new SqliteCommand("DELETE FROM template_items WHERE set_id=@id;", _conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@id", setId);
+                        cmd.ExecuteNonQuery();
+                    }
+                    using (var cmd = new SqliteCommand("DELETE FROM template_sets WHERE id=@id;", _conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@id", setId);
+                        cmd.ExecuteNonQuery();
+                    }
+                    tx.Commit();
+                }
+            }
+        }
+
+        public List<DisplayItem> LoadTemplatesBySet(long setId)
         {
             var list = new List<DisplayItem>();
             lock (_lock)
             {
-                using (var cmd = new SqliteCommand("SELECT id, title, text, sort_order FROM templates ORDER BY sort_order ASC;", _conn))
-                using (var r = cmd.ExecuteReader())
+                using (var cmd = new SqliteCommand("SELECT id, text, sort_order FROM template_items WHERE set_id=@s ORDER BY sort_order ASC;", _conn))
                 {
-                    while (r.Read())
+                    cmd.Parameters.AddWithValue("@s", setId);
+                    using (var r = cmd.ExecuteReader())
                     {
-                        list.Add(new DisplayItem
+                        while (r.Read())
                         {
-                            Id = r.GetInt64(0), IsTemplate = true,
-                            DisplayText = r.GetString(1), FullText = r.GetString(2),
-                            SortOrder = r.GetInt32(3), IsFavorite = false
-                        });
+                            list.Add(new DisplayItem
+                            {
+                                Id = r.GetInt64(0), IsTemplate = true, FullText = r.GetString(1),
+                                SortOrder = r.GetInt32(2), IsFavorite = false
+                            });
+                        }
                     }
                 }
             }
             return list;
         }
 
-        public DisplayItem AddTemplate(string title, string text)
+        public DisplayItem AddTemplateItem(long setId, string text)
         {
             lock (_lock)
             {
                 using (var tx = _conn.BeginTransaction())
                 {
-                    int maxOrder = 0;
-                    using (var cmd = new SqliteCommand("SELECT IFNULL(MAX(sort_order), -1) FROM templates;", _conn, tx))
-                        maxOrder = Convert.ToInt32(cmd.ExecuteScalar());
+                    int order = 0;
+                    using (var cmd = new SqliteCommand("SELECT IFNULL(MAX(sort_order), -1) FROM template_items WHERE set_id=@s;", _conn, tx))
+                    {
+                        cmd.Parameters.AddWithValue("@s", setId);
+                        order = Convert.ToInt32(cmd.ExecuteScalar()) + 1;
+                    }
 
                     long now = ToUnix(DateTime.UtcNow);
                     long newId;
-                    int newOrder = maxOrder + 1;
-
                     using (var cmd = new SqliteCommand(
-                        @"INSERT INTO templates(title, text, sort_order, created_at, updated_at)
-                          VALUES(@title, @txt, @o, @c, @u); SELECT last_insert_rowid();", _conn, tx))
+                        @"INSERT INTO template_items(set_id, text, sort_order, created_at, updated_at)
+                          VALUES(@s, @t, @o, @c, @u); SELECT last_insert_rowid();", _conn, tx))
                     {
-                        cmd.Parameters.AddWithValue("@title", title);
-                        cmd.Parameters.AddWithValue("@txt", text);
-                        cmd.Parameters.AddWithValue("@o", newOrder);
+                        cmd.Parameters.AddWithValue("@s", setId);
+                        cmd.Parameters.AddWithValue("@t", text);
+                        cmd.Parameters.AddWithValue("@o", order);
                         cmd.Parameters.AddWithValue("@c", now);
                         cmd.Parameters.AddWithValue("@u", now);
                         newId = Convert.ToInt64(cmd.ExecuteScalar());
                     }
                     tx.Commit();
-
-                    return new DisplayItem
-                    {
-                        Id = newId, IsTemplate = true, DisplayText = title, FullText = text, SortOrder = newOrder
-                    };
+                    return new DisplayItem { Id = newId, IsTemplate = true, FullText = text, SortOrder = order };
                 }
             }
         }
 
-        public void UpdateTemplate(long id, string title, string text)
+        public void UpdateTemplateItem(long id, string text)
         {
             lock (_lock)
             {
-                using (var cmd = new SqliteCommand("UPDATE templates SET title=@title, text=@txt, updated_at=@u WHERE id=@id;", _conn))
+                using (var cmd = new SqliteCommand("UPDATE template_items SET text=@t, updated_at=@u WHERE id=@id;", _conn))
                 {
-                    cmd.Parameters.AddWithValue("@title", title);
-                    cmd.Parameters.AddWithValue("@txt", text);
+                    cmd.Parameters.AddWithValue("@t", text);
                     cmd.Parameters.AddWithValue("@u", ToUnix(DateTime.UtcNow));
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.ExecuteNonQuery();
@@ -342,11 +385,11 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             }
         }
 
-        public void DeleteTemplate(long id)
+        public void DeleteTemplateItem(long id)
         {
             lock (_lock)
             {
-                using (var cmd = new SqliteCommand("DELETE FROM templates WHERE id=@id;", _conn))
+                using (var cmd = new SqliteCommand("DELETE FROM template_items WHERE id=@id;", _conn))
                 {
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.ExecuteNonQuery();
@@ -354,12 +397,7 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
             }
         }
 
-        public void ReorderTemplates(IReadOnlyList<long> orderedIds)
-        {
-            ReorderTable("templates", orderedIds);
-        }
-
-        // ========================== 共通ユーティリティ ==========================
+        public void ReorderTemplates(IReadOnlyList<long> orderedIds) => ReorderTable("template_items", orderedIds);
 
         private void ReorderTable(string table, IReadOnlyList<long> orderedIds)
         {
@@ -383,11 +421,6 @@ CREATE INDEX IF NOT EXISTS idx_tpl_sort ON templates(sort_order);
 
         private static string EscapeLike(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
         private static long ToUnix(DateTime dt) => (long)(dt.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
-
-        public void Dispose()
-        {
-            _conn?.Close();
-            _conn?.Dispose();
-        }
+        public void Dispose() { _conn?.Close(); _conn?.Dispose(); }
     }
 }
