@@ -12,9 +12,16 @@
     <RootNamespace>ClipHistory</RootNamespace>
     <!-- 高速起動・省メモリ最適化 -->
     <Optimize>true</Optimize>
-    <ServerGarbageCollection>false</ServerGarbageCollection>
-    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <TieredCompilation>true</TieredCompilation>
+
+    <!-- 手書き Properties/AssemblyInfo.cs との重複(CS0579)を防ぐため、
+         SDKによる AssemblyInfo の自動生成を無効化する -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+    <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
+    <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+    <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
+    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
   </PropertyGroup>
 
   <ItemGroup>
