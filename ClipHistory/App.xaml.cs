@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using ClipHistory.Data;
 using ClipHistory.Services;
 using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
 
 namespace ClipHistory
 {
@@ -20,6 +21,16 @@ namespace ClipHistory
 
         private void App_Startup(object sender, StartupEventArgs e)
         {
+            // 予期せぬエラー時に静かに落ちるのを防ぎ、エラー内容を画面に表示する
+            AppDomain.CurrentDomain.UnhandledException += (s, ev) =>
+                MessageBox.Show(ev.ExceptionObject.ToString(), "致命的なエラー", MessageBoxButton.OK, MessageBoxImage.Error);
+
+            DispatcherUnhandledException += (s, ev) =>
+            {
+                MessageBox.Show(ev.Exception.ToString(), "アプリケーションエラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                ev.Handled = true;
+            };
+
             _dataDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "ClipHistory");
@@ -33,7 +44,6 @@ namespace ClipHistory
 
             // ウィンドウは生成のみ（Showはしない）= 起動時は履歴を読み込まない
             _window = new MainWindow(_repo, _settings, settingsPath);
-            // ハンドル確保のため非表示で初期化（メッセージ受信に必要）
             _window.InitializeHidden();
 
             SetupTray();
@@ -60,7 +70,6 @@ namespace ClipHistory
 
         private Icon LoadIcon()
         {
-            // 埋め込みアイコンが無い場合はシステムアイコンを利用
             try { return SystemIcons.Application; }
             catch { return null; }
         }
