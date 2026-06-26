@@ -4,20 +4,15 @@ using System.Windows.Controls;
 
 namespace ClipHistory
 {
-    /// <summary>
-    /// 履歴編集用の軽量ダイアログ（XAML不要・コード生成で省メモリ）。
-    /// </summary>
     public sealed class EditDialog : Window
     {
         private readonly TextBox _box;
-
         public string EditedText => _box.Text;
+        public bool CopyRequested { get; private set; }
 
         public EditDialog(string text)
         {
-            Title = "履歴の編集";
-            Width = 400;
-            Height = 300;
+            Title = "履歴の編集"; Width = 450; Height = 300;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             ShowInTaskbar = false;
 
@@ -27,27 +22,23 @@ namespace ClipHistory
 
             _box = new TextBox
             {
-                Text = text,
-                AcceptsReturn = true,
-                TextWrapping = TextWrapping.Wrap,
+                Text = text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto
             };
-            Grid.SetRow(_box, 0);
-            grid.Children.Add(_box);
+            Grid.SetRow(_box, 0); grid.Children.Add(_box);
 
-            var panel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 8, 0, 0)
-            };
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
             var ok = new Button { Content = "保存", Width = 70, Margin = new Thickness(0, 0, 6, 0), IsDefault = true };
+            var copyOk = new Button { Content = "コピーして保存", Width = 110, Margin = new Thickness(0, 0, 6, 0) };
             var cancel = new Button { Content = "キャンセル", Width = 70, IsCancel = true };
+
             ok.Click += (s, e) => { DialogResult = true; };
+            copyOk.Click += (s, e) => { CopyRequested = true; DialogResult = true; };
+
             panel.Children.Add(ok);
+            panel.Children.Add(copyOk);
             panel.Children.Add(cancel);
-            Grid.SetRow(panel, 1);
-            grid.Children.Add(panel);
+            Grid.SetRow(panel, 1); grid.Children.Add(panel);
 
             Content = grid;
         }
