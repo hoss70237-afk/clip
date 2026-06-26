@@ -1,0 +1,25 @@
+<!-- File: ClipHistory/ClipHistory.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- net48 は Windows 7 SP1 以降で動作可能 -->
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>ClipHistory</AssemblyName>
+    <RootNamespace>ClipHistory</RootNamespace>
+    <!-- 高速起動・省メモリ最適化 -->
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredCompilation>true</TieredCompilation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 唯一の外部依存。軽量なネイティブSQLiteラッパ -->
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.118" />
+  </ItemGroup>
+
+</Project>
