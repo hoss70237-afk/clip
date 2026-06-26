@@ -18,10 +18,10 @@ namespace ClipHistory
         private HistoryRepository _repo;
         private Settings _settings;
         private string _dataDir;
+        private string _settingsPath;
 
         private void App_Startup(object sender, StartupEventArgs e)
         {
-            // 予期せぬエラー時に静かに落ちるのを防ぎ、エラー内容を画面に表示する
             AppDomain.CurrentDomain.UnhandledException += (s, ev) =>
                 MessageBox.Show(ev.ExceptionObject.ToString(), "致命的なエラー", MessageBoxButton.OK, MessageBoxImage.Error);
 
@@ -31,19 +31,16 @@ namespace ClipHistory
                 ev.Handled = true;
             };
 
-            _dataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "ClipHistory");
+            _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClipHistory");
             Directory.CreateDirectory(_dataDir);
 
             string dbPath = Path.Combine(_dataDir, "history.db");
-            string settingsPath = Path.Combine(_dataDir, "settings.ini");
+            _settingsPath = Path.Combine(_dataDir, "settings.ini");
 
             _repo = new HistoryRepository(dbPath);
-            _settings = SettingsManager.Load(settingsPath);
+            _settings = SettingsManager.Load(_settingsPath);
 
-            // ウィンドウは生成のみ（Showはしない）= 起動時は履歴を読み込まない
-            _window = new MainWindow(_repo, _settings, settingsPath);
+            _window = new MainWindow(_repo, _settings, _settingsPath);
             _window.InitializeHidden();
 
             SetupTray();
@@ -76,6 +73,12 @@ namespace ClipHistory
 
         private void App_Exit(object sender, ExitEventArgs e)
         {
+            // 終了時にウィンドウサイズを含めた設定を保存
+            if (_settings != null && !string.IsNullOrEmpty(_settingsPath))
+            {
+                SettingsManager.Save(_settingsPath, _settings);
+            }
+
             _tray?.Dispose();
             _window?.DisposeResources();
             _repo?.Dispose();
