@@ -1,37 +1,30 @@
 // File: ClipHistory/Data/HistoryRepository.cs
 using System;
 using System.Collections.Generic;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 using System.IO;
 using ClipHistory.Models;
 
 namespace ClipHistory.Data
 {
-    /// <summary>
-    /// SQLite による永続化。全件をメモリに展開せず、
-    /// ページング・遅延ロードで必要分のみ取得する。
-    /// </summary>
     public sealed class HistoryRepository : IDisposable
     {
         public const int MaxItems = 10000;
 
-        private readonly SQLiteConnection _conn;
+        private readonly SqliteConnection _conn;
         private readonly object _lock = new object();
 
         public HistoryRepository(string dbPath)
         {
             bool isNew = !File.Exists(dbPath);
 
-            var csb = new SQLiteConnectionStringBuilder
+            var csb = new SqliteConnectionStringBuilder
             {
                 DataSource = dbPath,
-                JournalMode = SQLiteJournalModeEnum.Wal, // 書き込み高速化
-                SyncMode = SynchronizationModes.Normal,
-                Pooling = false,
                 CacheSize = 2000
             };
 
-            _conn = new SQLiteConnection(csb.ToString());
+            _conn = new SqliteConnection(csb.ToString());
             _conn.Open();
 
             if (isNew)
@@ -43,8 +36,11 @@ namespace ClipHistory.Data
 
         private void Initialize()
         {
+            // 接続文字列ではなくPRAGMAでWALモードと同期設定を行う
             ExecuteNonQuery(@"
 PRAGMA page_size = 4096;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 ");
         }
 
@@ -66,34 +62,29 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
 
         private void ExecuteNonQuery(string sql)
         {
-            using (var cmd = new SQLiteCommand(sql, _conn))
+            using (var cmd = new SqliteCommand(sql, _conn))
             {
                 cmd.ExecuteNonQuery();
             }
         }
 
-        /// <summary>総件数を取得（起動時の全展開を避ける）</summary>
         public int Count()
         {
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM history;", _conn))
+                using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM history;", _conn))
                 {
                     return Convert.ToInt32(cmd.ExecuteScalar());
                 }
             }
         }
 
-        /// <summary>
-        /// 指定オフセットから limit 件を遅延ロード。
-        /// UI仮想化と組み合わせて使用する。
-        /// </summary>
         public List<ClipItem> LoadPage(int offset, int limit)
         {
             var list = new List<ClipItem>(limit);
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     @"SELECT id, text, sort_order, is_favorite, created_at, updated_at
                       FROM history
                       ORDER BY sort_order ASC
@@ -107,13 +98,12 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
             return list;
         }
 
-        /// <summary>部分一致検索。インデックス活用 + LIMIT で高速化。</summary>
         public List<ClipItem> Search(string keyword, int limit)
         {
             var list = new List<ClipItem>(limit);
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     @"SELECT id, text, sort_order, is_favorite, created_at, updated_at
                       FROM history
                       WHERE text LIKE @kw ESCAPE '\'
@@ -131,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
         private static string EscapeLike(string s)
             => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
-        private static void ReadAll(SQLiteCommand cmd, List<ClipItem> list)
+        private static void ReadAll(SqliteCommand cmd, List<ClipItem> list)
         {
             using (var r = cmd.ExecuteReader())
             {
@@ -150,11 +140,6 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
             }
         }
 
-        /// <summary>
-        /// 新規追加。先頭(sort_order 最小 - 1)に挿入し、
-        /// 上限超過時に最古を削除する。
-        /// 同一テキストが既に先頭にある場合は重複追加しない。
-        /// </summary>
         public ClipItem Add(string text)
         {
             lock (_lock)
@@ -164,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
                     long now = ToUnix(DateTime.UtcNow);
 
                     int minOrder = 0;
-                    using (var cmd = new SQLiteCommand(
+                    using (var cmd = new SqliteCommand(
                         "SELECT IFNULL(MIN(sort_order), 1) FROM history;", _conn, tx))
                     {
                         minOrder = Convert.ToInt32(cmd.ExecuteScalar());
@@ -172,7 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
                     int newOrder = minOrder - 1;
 
                     long newId;
-                    using (var cmd = new SQLiteCommand(
+                    using (var cmd = new SqliteCommand(
                         @"INSERT INTO history(text, sort_order, is_favorite, created_at, updated_at)
                           VALUES(@t, @o, 0, @c, @u);
                           SELECT last_insert_rowid();", _conn, tx))
@@ -184,9 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
                         newId = Convert.ToInt64(cmd.ExecuteScalar());
                     }
 
-                    // 上限超過時、お気に入り以外の最古を削除
                     TrimExcess(tx);
-
                     tx.Commit();
 
                     return new ClipItem
@@ -202,17 +185,17 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
             }
         }
 
-        private void TrimExcess(SQLiteTransaction tx)
+        private void TrimExcess(SqliteTransaction tx)
         {
             int count;
-            using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM history;", _conn, tx))
+            using (var cmd = new SqliteCommand("SELECT COUNT(*) FROM history;", _conn, tx))
             {
                 count = Convert.ToInt32(cmd.ExecuteScalar());
             }
             if (count <= MaxItems) return;
 
             int over = count - MaxItems;
-            using (var cmd = new SQLiteCommand(
+            using (var cmd = new SqliteCommand(
                 @"DELETE FROM history
                   WHERE id IN (
                       SELECT id FROM history
@@ -230,7 +213,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
         {
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     "UPDATE history SET text=@t, updated_at=@u WHERE id=@id;", _conn))
                 {
                     cmd.Parameters.AddWithValue("@t", text);
@@ -245,7 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
         {
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     "UPDATE history SET is_favorite=@f, updated_at=@u WHERE id=@id;", _conn))
                 {
                     cmd.Parameters.AddWithValue("@f", fav ? 1 : 0);
@@ -256,17 +239,16 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
             }
         }
 
-        /// <summary>並べ替え結果の永続化。idの並び通りに sort_order を再設定。</summary>
         public void Reorder(IReadOnlyList<long> orderedIds)
         {
             lock (_lock)
             {
                 using (var tx = _conn.BeginTransaction())
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     "UPDATE history SET sort_order=@o WHERE id=@id;", _conn, tx))
                 {
-                    var pO = cmd.Parameters.Add("@o", System.Data.DbType.Int32);
-                    var pId = cmd.Parameters.Add("@id", System.Data.DbType.Int64);
+                    var pO = cmd.Parameters.Add("@o", SqliteType.Integer);
+                    var pId = cmd.Parameters.Add("@id", SqliteType.Integer);
                     for (int i = 0; i < orderedIds.Count; i++)
                     {
                         pO.Value = i;
@@ -278,12 +260,10 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
             }
         }
 
-        /// <summary>順送り用。指定 sort_order の「次」の1件を取得（循環）。</summary>
         public ClipItem GetNextForCycle(int currentIndex)
         {
             lock (_lock)
             {
-                // currentIndex はリスト上のオフセットとして扱う
                 var page = LoadPageNoLock(currentIndex, 1);
                 return page.Count > 0 ? page[0] : null;
             }
@@ -292,7 +272,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
         private List<ClipItem> LoadPageNoLock(int offset, int limit)
         {
             var list = new List<ClipItem>(limit);
-            using (var cmd = new SQLiteCommand(
+            using (var cmd = new SqliteCommand(
                 @"SELECT id, text, sort_order, is_favorite, created_at, updated_at
                   FROM history ORDER BY sort_order ASC LIMIT @limit OFFSET @offset;", _conn))
             {
@@ -307,7 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_text  ON history(text);
         {
             lock (_lock)
             {
-                using (var cmd = new SQLiteCommand("DELETE FROM history WHERE id=@id;", _conn))
+                using (var cmd = new SqliteCommand("DELETE FROM history WHERE id=@id;", _conn))
                 {
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.ExecuteNonQuery();
