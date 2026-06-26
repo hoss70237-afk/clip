@@ -53,6 +53,17 @@ namespace ClipHistory
             _settings = settings;
             _settingsPath = settingsPath;
             InitializeComponent();
+
+            // 起動時に設定からウィンドウサイズを復元
+            Width = _settings.WindowWidth;
+            Height = _settings.WindowHeight;
+
+            // サイズが変更されたら設定クラスに記録（終了時に保存される）
+            SizeChanged += (s, e) =>
+            {
+                _settings.WindowWidth = Width;
+                _settings.WindowHeight = Height;
+            };
         }
 
         public void InitializeHidden()
@@ -81,7 +92,6 @@ namespace ClipHistory
         {
             if (!IsVisible)
             {
-                // 次回起動時は必ず通常履歴表示状態で起動
                 TabHistory.IsChecked = true; 
                 ReloadList();
                 SetPositionToMouse();
@@ -280,9 +290,13 @@ namespace ClipHistory
         private void OnCycleHotkey()
         {
             int total = _repo.CountHistory();
-            if (total == 0) return;
+            if (total <= 1) return; // 1件以下なら順送りの意味がないため何もしない
 
-            if (!_cycleInProgress) { _cycleInProgress = true; _cycleIndex = 0; }
+            if (!_cycleInProgress) 
+            { 
+                _cycleInProgress = true; 
+                _cycleIndex = 1; // コピー済みの最新(0番目)を飛ばして、2つ目の履歴からスタートする
+            }
 
             var item = _repo.GetNextForCycle(_cycleIndex);
             if (item == null)
@@ -294,7 +308,7 @@ namespace ClipHistory
 
             SetClipboardText(item.FullText);
             _cycleIndex++;
-            if (_cycleIndex >= total) _cycleIndex = 0;
+            if (_cycleIndex >= total) _cycleIndex = 0; // 末尾まで行ったら最新(0)へ循環
         }
 
         private void SetClipboardText(string text)
@@ -396,7 +410,6 @@ namespace ClipHistory
 
                 if (selectedItem != null)
                 {
-                    // 定型文に登録メニューの構築
                     var sets = _repo.LoadTemplateSets();
                     if (sets.Count > 0)
                     {
