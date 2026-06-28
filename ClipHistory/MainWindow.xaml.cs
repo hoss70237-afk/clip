@@ -223,6 +223,15 @@ namespace ClipHistory
             }
         }
 
+        private void DeleteSet_Click(object sender, RoutedEventArgs e)
+        {
+            if (ComboTemplateSet.SelectedItem is TemplateSet selected && selected.Id != -1)
+            {
+                _repo.DeleteTemplateSet(selected.Id);
+                LoadTemplateSets();
+            }
+        }
+
         private void ReloadList()
         {
             List<DisplayItem> data;
