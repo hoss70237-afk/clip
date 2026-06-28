@@ -100,19 +100,20 @@ CREATE INDEX IF NOT EXISTS idx_tpl_set ON template_items(set_id);
             return list;
         }
 
-        public List<DisplayItem> SearchHistory(string keyword, int limit, bool onlyFavorites)
+        public List<DisplayItem> SearchHistory(string keyword, int limit, int offset, bool onlyFavorites)
         {
             var list = new List<DisplayItem>(limit);
             lock (_lock)
             {
                 string sql = "SELECT id, text, sort_order, is_favorite FROM history WHERE text LIKE @kw ESCAPE '\\'";
                 if (onlyFavorites) sql += " AND is_favorite = 1";
-                sql += " ORDER BY sort_order ASC LIMIT @limit;";
+                sql += " ORDER BY sort_order ASC LIMIT @limit OFFSET @offset;";
 
                 using (var cmd = new SqliteCommand(sql, _conn))
                 {
                     cmd.Parameters.AddWithValue("@kw", "%" + EscapeLike(keyword) + "%");
                     cmd.Parameters.AddWithValue("@limit", limit);
+                    cmd.Parameters.AddWithValue("@offset", offset);
                     ReadHistory(cmd, list);
                 }
             }
@@ -142,11 +143,18 @@ CREATE INDEX IF NOT EXISTS idx_tpl_set ON template_items(set_id);
                 using (var tx = _conn.BeginTransaction())
                 {
                     long existingId = 0;
-                    using (var cmd = new SqliteCommand("SELECT id FROM history WHERE text=@t LIMIT 1;", _conn, tx))
+                    int existingFav = 0;
+                    using (var cmd = new SqliteCommand("SELECT id, is_favorite FROM history WHERE text=@t LIMIT 1;", _conn, tx))
                     {
                         cmd.Parameters.AddWithValue("@t", text);
-                        var res = cmd.ExecuteScalar();
-                        if (res != null) existingId = Convert.ToInt64(res);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                existingId = reader.GetInt64(0);
+                                existingFav = reader.GetInt32(1);
+                            }
+                        }
                     }
 
                     if (existingId > 0)
@@ -167,10 +175,11 @@ CREATE INDEX IF NOT EXISTS idx_tpl_set ON template_items(set_id);
                     long newId;
                     using (var cmd = new SqliteCommand(
                         @"INSERT INTO history(text, sort_order, is_favorite, created_at, updated_at)
-                          VALUES(@t, @o, 0, @c, @u); SELECT last_insert_rowid();", _conn, tx))
+                          VALUES(@t, @o, @f, @c, @u); SELECT last_insert_rowid();", _conn, tx))
                     {
                         cmd.Parameters.AddWithValue("@t", text);
                         cmd.Parameters.AddWithValue("@o", newOrder);
+                        cmd.Parameters.AddWithValue("@f", existingFav);
                         cmd.Parameters.AddWithValue("@c", now);
                         cmd.Parameters.AddWithValue("@u", now);
                         newId = Convert.ToInt64(cmd.ExecuteScalar());
@@ -178,7 +187,7 @@ CREATE INDEX IF NOT EXISTS idx_tpl_set ON template_items(set_id);
 
                     TrimHistoryExcess(tx);
                     tx.Commit();
-                    return new DisplayItem { Id = newId, IsTemplate = false, FullText = text, SortOrder = newOrder, IsFavorite = false };
+                    return new DisplayItem { Id = newId, IsTemplate = false, FullText = text, SortOrder = newOrder, IsFavorite = existingFav != 0 };
                 }
             }
         }
