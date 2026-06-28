@@ -45,8 +45,10 @@
             <Button x:Name="BtnDeleteSet" Grid.Column="1" Content="✕" Width="26" Margin="4,0,0,0" ToolTip="このセットを削除" Click="DeleteSet_Click" Visibility="Collapsed"/>
         </Grid>
 
-        <!-- 横スクロール無効化 -->
+        <!-- 横スクロール無効化 + 複数選択・スクロールイベント追加 -->
         <ListBox x:Name="HistoryList" Grid.Row="2"
+                 SelectionMode="Extended"
+                 ScrollViewer.ScrollChanged="HistoryList_ScrollChanged"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="True"
                  VirtualizingPanel.VirtualizationMode="Recycling"
